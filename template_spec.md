@@ -80,7 +80,9 @@ summaries above, but should be considered in the final version of this specifica
 
 ### Documentation Impact
 
+These are some impacts to the documentation. See reference one [^1] for details.
+
 ### References
 
-1. See reference one [^1] for details.
-[^1]: Reference One Link
+1. [^1]: Reference One Link:
+   <a href="https://github.com/os-net-config/os-net-config-specs">os-net-config-specs repository</a>
