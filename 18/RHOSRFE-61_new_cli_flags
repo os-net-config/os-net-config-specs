@@ -2,87 +2,163 @@
 
 ### Problem Descriptions
 
-This is where you should describe the problem that you are trying to solve.
-Be succinct but specific, examples are great, links to bug reports are even
-better. If you don't convince the reader there is a problem, then they are
-unlikely to agree to work with you on a solution.
+This specification defines several new CLI flags and modifies the behavior of the --noop flag
+to improve the os-net-config workflow. These new flags will allow rollback of changes, allow
+os-net-config to continue making modifications even if one interface fails to be configured
+as requested, and will add functionality to look for IP address conflicts in the inteface
+configurations which have static IP addresses.
 
 ### Background Context (Optional)
 
-If there is some more background context, provide it here, otherwise feel
-free to delete this section and move on to the proposed solution.
+Currently os-net-config does not have the ability to rollback if an inteface configuration
+leads to an error, instead the execution will halt and typically the network configuration will
+be left in a state with broken or limited connectivity. This situation is worse with the ifcfg
+provider than with the nmstate provider, because nmstate supports rollback natively. Furthermore,
+IP address conflict detection only happens after the interface configurations are applied. Since
+the interface configurations are applied serially, when an error occurs further interfaces may
+not be brought up, leading to inconsistent or broken state.
 
 ### Proposed Changes
 
-This is a summary of the proposed solutions.
+Several new CLI flags would be added in order to support rollbacks, continuing to apply interface
+configurations after an error occurs, and new funcionality to check for IP address conflicts when
+the --noop flag is used would be added.
 
 #### List of Proposed Changes
 
-1. Solution 1
-2. Solution 2
+1. Add the --current-config flag which would be used to pass a copy of the config template which
+   would be used to rollback to if the --rollback flag is used, or possibly to modify the behavior
+   of the --cleanup flag to limit cleanup to only removing interface configurations which were
+   present in the --current-config configuration provided but are not present in the new config
+   template which is being applied.
+2. Add the --rollback flag which would either support rolling back to the original configuration
+   or to the --current-config template which is specified on the command-line.
+3. Add the --no-abort flag which would modify the workflow to not abort when a single interface
+   error is encountered and continue to apply the configuration on other interfaces, but then
+   return a non-zero result code when the execution completes.
+4. Modify the behavior of the --noop flag to allow for duplicate IP detection of the static IP
+   addresses contained in the proposed configuration.
 
 #### Overview
 
-This is an overview of the proposed changes.
+The new flags proposed would allow for a rollback option to use a specified configuration to
+rollback to. The --rollback flag would specify that os-net-config would attempt to apply an
+alternate configuration if the proposed configuration fails. The --current-config (or possibly
+a different name would be more appropriate) would speficy what configuration should be applied
+if the proposed configuration fails to apply cleanly. The --no-abort flag would modify the
+workflow such that if an error occurs when configuring an interface, the other interface
+configurations would be applied rather than exiting immediately with an error and a non-zero
+return code. A special return code would indicate that an error had occurred but the remaining
+interfaces were configured and os-net-config attempted to bring the interfaces up or restarted
+them. Finally the --noop flag would add a subrouting to attempt to detect duplicate IPs on the
+network to alert to whether the static IPs proposed would result in a duplicate IP detected error
+when the interface configuration was applied and the interface was brought up or restarted.
 
 ### Alternatives
 
-If there are alternatives to making the change, list them in this section.
+Instead of applying these changes in os-net-config there are other approaches that could be
+taken instead.
 
-1. Alternative Solution 1
-2. Alternative Solution 2
+1. Rather than adding the --rollback, --current-config, and --no-abort option, the workflow could
+   be applied by a wrapper script which would run os-net-config several times with different
+   config templates applied each time. This would result in the same or similar outcome to the
+   proposed CLI flags, but the logs would not be as clear as to what was occurring and it is
+   possible that with less state information available to the wrapper script that certain corner
+   cases could not be handled.
+2. Instead of running duplicate IP detection inside the --noop workflow, the duplicate IP
+   detection could be performed by extracting the static IP information out of the config
+   template and running the duplicate IP detection algorithm using a shell script or Ansible
+   playbook, etc. This has the disadvantage that the workflow would need to be implemented in
+   the external tool being used (shell script, Ansible playbook, etc.) and would need to be
+   implemented differently by each tool which is calling os-net-config. This would increase
+   complexity and could result in more errors if the workflow needs to be performed differently
+   using different scripting methods (such as shell scripts in one implementation and Ansible
+   playbooks in another implementation. By writing this logic once in the os-net-config codebase
+   the logic could be thoroughly tested and would potentially be more trustworthy and have less
+   chance of bugs occurring in one implementation.
+
 
 #### Security Impacts
 
-If there are any security impacts, please list them here or give them other consideration.
-The mission of os-net-config is to make network deployments easy and automatic,
-not to give script kiddiez another tool for their lulz.
+On possible security impact could be that a malicious attacker could pass a desired configuration
+via the --current-config flag, along with a config template which is known to create errors,
+knowing that the requested configuration would fail and that the current configuration would be
+applied. This is a low-level impact because a malicious configuration could even more easily be
+passed in the requested config template, and if an attacker already has root access to run
+os-net-config than the attacker has all the access they would need to apply any malicious config
+they desire.
+
+Another potential impact is the risk of using --noop along with a custom-crafted configuration
+with static IP addresses in order to surreptitiously run a network scanning attack. However the
+attacker would already have access to run the tools needed to detect the presense of IP addresses
+in use on the network, so this is another low-level risk.
 
 #### Other end-user impact
 
-Are there any other considerations to the end user that should be noted?
+The changes proposed here should improve the flexibility for end-users and make it easier to
+handle potential errors and recover from them more gracefully.
 
 #### Developer Impact
 
-What is the impact on the developers regarding this change? Does it require a major
-refactoring of code, or is it a simple enhancement? Will there be any issues with
-backwards-compatibility? Are there any concerns about this being limited to a single
-provier/implementation/back-end?
+These changes will require careful analysis of the workflow logic, and will need to be tested
+to ensure that the workflow is executing as designed in all cases. 
 
 ### Implementation
 
-Describe the implementation in some overal terms, such as scope of work and assignment
-of duties. Who will be making the changes, and over what time-frame? What is the
-definition of done, and what are the success criteria?
+The implementation proposed here should be implemented in the cli.py code and also in the ifcfg
+provider. A follow-on patchseries could replicate the behavior in the nmstate provider.
 
 #### Assignee(s)
 
-Who will be doing the work?
+This work will be a collaboration between former Nokia engineers who are now working within
+Red Hat to improve os-net-config and the current maintainers of os-net-config, Dan Sneddon
+<dsneddon@redhat.com>, Karthik Sundaravel <ksundara@redhat.com>, and Viji Candappa
+<vcandapp@redhat.com>, and possibly other contrubutors.
 
 #### Approver(s)
 
-Who will be approving the work, only the maintainers of os-net-config, or are there
-other parties who have a vested interest in the success of the implementation?
+This specification work will be approved through the normal change review process, as well as
+the changes to os-net-config. Red Hat QE engineers working alongside developers will review
+the behavior of the changes and validate that they work as designed before the work which is
+done upstream in the Github repository will be brought into the Red Hat product repositories
+for Red Hat OpenStack Services on OpenShift and possibly Red Hat OpenStack RPM repositories
+which are provided for Red Hat Cloud subscribers.
 
 #### Work Items
 
-1. Work Item 1
-2. Work Item 2
+1. Approve specification using the change review process.
+2. Schedule the work on the os-net-config repositories on GitHub.
+3. Test the changes.
+4. Bring the changes into the product RPM repositories for inclusion into the official RPM
+   packages used by customers and included in a future released version.
 
 #### Implementation Details
 
-Here are some details that were either too technical or too abstract to include in the
-summaries above, but should be considered in the final version of this specification?
+To be determined.
 
 ### Dependencies
 
+There will be several command-line utilities which will be required in order to perform
+duplicate IP detection on a host which is running os-net-config. It should be possible to
+check for the presence of these utilities before attempting to run the utilities, or to handle
+failures gracefully and log an appropriate message in the logs.
+
 ### Testing
+
+Testing will involve setting up several workflows which are expected to fail and check for
+graceful handling of the failures, as well as testing duplicate IP detection on networks where
+the IP addresses requested are already in use by other hosts on the network.
 
 ### Documentation Impact
 
-These are some impacts to the documentation. See reference one [^1] for details.
+The official os-net-config doucmentation will need to be updated, as well as the examples
+in the /etc/os-net-config/ subdirectory of the source code. See [^1] for details. Also see the
+Jira issue [^2] which describes these changes in more general terms.
 
 ### References
 
-[^1]: Reference One Link:
-   <a href="https://github.com/os-net-config/os-net-config-specs">os-net-config-specs repository</a>
+[^1]: Official GitHub os-net-config repository:
+   <a href="https://github.com/os-net-config/os-net-config">os-net-config repository</a>
+[^2]: Jira issue RHOSRFE-61
+   <a href="https://issues.redhat.com/browse/RHOSRFE-61">Jira issue RHOSRFE-61</a>
+
